@@ -1,6 +1,5 @@
 from data.loaders import get_cifar_loader
-from models.vgg import VGG_A_BatchNorm  # you need to implement this network
-from models.vgg import VGG_A
+from models.vgg import VGG_A_BatchNorm, VGG_A
 from IPython import display
 from tqdm import tqdm as tqdm
 import random
@@ -17,7 +16,6 @@ mpl.use('Agg')
 # 设置中文字体支持
 plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC"]
 
-
 # ## Constants (parameters) initialization
 device_id = [0, 1, 2, 3]
 num_workers = 0  # Set to 0 for Windows to avoid multiprocessing issues
@@ -31,6 +29,12 @@ home_path = module_path
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 figures_path = os.path.join(home_path, 'reports', 'figures', timestamp)
 models_path = os.path.join(home_path, 'reports', 'models', timestamp)
+losses_path = os.path.join(home_path, 'reports', 'losses', timestamp)
+grads_path = os.path.join(home_path, 'reports', 'grads', timestamp)
+
+# 确保保存损失和梯度的目录存在
+os.makedirs(losses_path, exist_ok=True)
+os.makedirs(grads_path, exist_ok=True)
 
 # Make sure you are using the right device.
 use_cuda = torch.cuda.is_available()
@@ -41,11 +45,10 @@ if use_cuda:
     for i in range(torch.cuda.device_count()):
         print(f"device {i}: {torch.cuda.get_device_name(i)}")
 
-
 # This function is used to calculate the accuracy of model classification
+
+
 def get_accuracy(model, loader):
-    # --------------------
-    # Add code as needed
     correct = 0
     total = 0
     model.eval()
@@ -60,8 +63,6 @@ def get_accuracy(model, loader):
             correct += (predicted == y).sum().item()
     return correct / total
 
-    # --------------------
-
 # Set a random seed to ensure reproducible results
 
 
@@ -75,14 +76,15 @@ def set_random_seeds(seed_value=0, device='cpu'):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-
 # We use this function to complete the entire
 # training process. In order to plot the loss landscape,
 # you need to record the loss value of each step.
 # Of course, as before, you can test your model
 # after drawing a training round and save the curve
 # to observe the training
-def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None, epochs_n=100, best_model_path=None):
+
+
+def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None, epochs_n=100, best_model_path=None, lr=None):
     model.to(device)
     learning_curve = [np.nan] * epochs_n
     train_accuracy_curve = [np.nan] * epochs_n
@@ -109,12 +111,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
             optimizer.zero_grad()
             prediction = model(x)
             loss = criterion(prediction, y)
-            # You may need to record some variable values here
-            # if you want to get loss gradient, use
-            # grad = model.classifier[4].weight.grad.clone()
-            # --------------------
-            # Add your code
-            #
+
             loss_list.append(loss.item())
             learning_curve[epoch] += loss.item()
 
@@ -136,7 +133,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
 
             optimizer.step()
             optimizer.zero_grad()  # Clear gradients for next iteration
-            # --------------------
 
         losses_list.append(loss_list)
         grads.append(grad)
@@ -147,11 +143,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
         axes[0].plot(learning_curve[:epoch+1])
         axes[0].set_title('Training Loss')
 
-        # Test your model and save figure here (not required)
-        # remember to use model.eval()
-        # --------------------
-        # Add code as needed
-        #
         # Calculate accuracies
         train_acc = get_accuracy(model, train_loader)
         val_acc = get_accuracy(model, val_loader)
@@ -177,83 +168,85 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
 
         plt.tight_layout()
         plt.savefig(os.path.join(
-            figures_path, f'training_progress_epoch{epoch+1}.png'), dpi=300)
+            figures_path, f'training_progress_lr_{lr}_epoch{epoch+1}.png'), dpi=300)
         plt.close()  # Prevent memory leak
 
         print(f'Epoch {epoch+1}/{epochs_n}')
         print(f'Train Accuracy: {train_acc:.4f}, Val Accuracy: {val_acc:.4f}')
         print(
             f'Best Val Accuracy: {max_val_accuracy:.4f} at epoch {max_val_accuracy_epoch+1}')
-        # --------------------
 
-    return losses_list, grads, learning_curve, train_accuracy_curve, val_accuracy_curve
+    # 保存损失和梯度
+    np.save(os.path.join(losses_path, f'losses_lr_{lr}.npy'), losses_list)
+    np.save(os.path.join(grads_path, f'grads_lr_{lr}.npy'), grads)
 
+    return losses_list, grads
 
 # Use this function to plot the final loss landscape,
 # fill the area between the two curves can use plt.fill_between()
-def plot_loss_landscape(losses):
-    min_curve = np.min(losses, axis=0)
-    max_curve = np.max(losses, axis=0)
+
+
+def plot_loss_landscape(losses_without_bn, losses_with_bn, title, save_path):
+    min_curve_without_bn = np.min(losses_without_bn, axis=0)
+    max_curve_without_bn = np.max(losses_without_bn, axis=0)
+    min_curve_with_bn = np.min(losses_with_bn, axis=0)
+    max_curve_with_bn = np.max(losses_with_bn, axis=0)
+
     plt.figure(figsize=(10, 6))
-    x = np.arange(len(min_curve))
-    plt.plot(x, min_curve, label='Min Loss')
-    plt.plot(x, max_curve, label='Max Loss')
-    plt.fill_between(x, min_curve, max_curve, alpha=0.2)
+    x = np.arange(len(min_curve_without_bn))
+
+    plt.plot(x, min_curve_without_bn,
+             label='Min Loss without BN', color='blue')
+    plt.plot(x, max_curve_without_bn, label='Max Loss without BN',
+             color='blue', linestyle='--')
+    plt.fill_between(x, min_curve_without_bn,
+                     max_curve_without_bn, color='blue', alpha=0.2)
+
+    plt.plot(x, min_curve_with_bn, label='Min Loss with BN', color='red')
+    plt.plot(x, max_curve_with_bn, label='Max Loss with BN',
+             color='red', linestyle='--')
+    plt.fill_between(x, min_curve_with_bn, max_curve_with_bn,
+                     color='red', alpha=0.2)
+
     plt.xlabel('Training Steps')
     plt.ylabel('Loss')
-    plt.title('Loss Landscape')
+    plt.title(title)
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(figures_path, 'loss_landscape.png'), dpi=300)
+    plt.savefig(save_path, dpi=300)
     plt.close()
 
-
-# 保存样本图像函数
-def save_sample_images(loader, count=16, path=None):
-    """保存样本图像及其标签"""
-    if path is None:
-        path = os.path.join(figures_path, 'sample_images.png')
-
-    X, y = next(iter(loader))
-    plt.figure(figsize=(10, 10))
-
-    for i in range(min(count, X.size(0))):
-        plt.subplot(4, 4, i+1)
-        plt.imshow(X[i].permute(1, 2, 0))  # 调整通道顺序
-        plt.title(f'Label: {y[i]}')
-        plt.axis('off')
-
-    plt.tight_layout()
-    plt.savefig(path, dpi=300)
-    plt.close()
+# Plot gradient landscape
 
 
-# 保存预测结果可视化函数
-def save_prediction_examples(model, loader, class_names, count=16, path=None):
-    """保存模型预测结果可视化"""
-    if path is None:
-        path = os.path.join(figures_path, 'prediction_examples.png')
+def plot_gradient_landscape(grads_without_bn, grads_with_bn, title, save_path):
+    min_curve_without_bn = np.min(grads_without_bn, axis=0)
+    max_curve_without_bn = np.max(grads_without_bn, axis=0)
+    min_curve_with_bn = np.min(grads_with_bn, axis=0)
+    max_curve_with_bn = np.max(grads_with_bn, axis=0)
 
-    model.eval()
-    X, y = next(iter(loader))
-    X = X.to(device)
+    plt.figure(figsize=(10, 6))
+    x = np.arange(len(min_curve_without_bn))
 
-    with torch.no_grad():
-        outputs = model(X)
-        _, predicted = torch.max(outputs, 1)
+    plt.plot(x, min_curve_without_bn,
+             label='Min Gradient without BN', color='blue')
+    plt.plot(x, max_curve_without_bn, label='Max Gradient without BN',
+             color='blue', linestyle='--')
+    plt.fill_between(x, min_curve_without_bn,
+                     max_curve_without_bn, color='blue', alpha=0.2)
 
-    plt.figure(figsize=(10, 10))
+    plt.plot(x, min_curve_with_bn, label='Min Gradient with BN', color='red')
+    plt.plot(x, max_curve_with_bn, label='Max Gradient with BN',
+             color='red', linestyle='--')
+    plt.fill_between(x, min_curve_with_bn, max_curve_with_bn,
+                     color='red', alpha=0.2)
 
-    for i in range(min(count, X.size(0))):
-        plt.subplot(4, 4, i+1)
-        plt.imshow(X[i].cpu().permute(1, 2, 0))  # 调整通道顺序
-        true_label = class_names[y[i]]
-        pred_label = class_names[predicted[i]]
-        plt.title(f'True: {true_label}\nPred: {pred_label}')
-        plt.axis('off')
-
-    plt.tight_layout()
-    plt.savefig(path, dpi=300)
+    plt.xlabel('Training Steps')
+    plt.ylabel('Gradient')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(save_path, dpi=300)
     plt.close()
 
 
@@ -281,50 +274,44 @@ if __name__ == '__main__':
 
     # Training parameters
     epo = 20
+    learning_rates = [1e-3, 2e-3, 1e-4, 5e-4]
 
-    set_random_seeds(seed_value=2020, device=str(device))
-    model = VGG_A()
-    lr = 0.001
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
+    all_losses_without_bn = []
+    all_grads_without_bn = []
+    all_losses_with_bn = []
+    all_grads_with_bn = []
 
-    # 定义带时间戳的模型保存路径
-    best_model_path = os.path.join(models_path, f'best_model_{timestamp}.pth')
-    final_model_path = os.path.join(
-        models_path, f'final_model_{timestamp}.pth')
+    for lr in learning_rates:
+        set_random_seeds(seed_value=2020, device=str(device))
 
-    # 执行训练并获取额外返回值
-    losses, grads, learning_curve, train_accuracy_curve, val_accuracy_curve = train(
-        model, optimizer, criterion, train_loader, val_loader, epochs_n=epo, best_model_path=best_model_path)
+        # Train model without BN
+        model_without_bn = VGG_A()
+        optimizer_without_bn = torch.optim.Adam(
+            model_without_bn.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
+        best_model_path_without_bn = os.path.join(
+            models_path, f'best_model_without_bn_{lr}_{timestamp}.pth')
+        losses_without_bn, grads_without_bn = train(
+            model_without_bn, optimizer_without_bn, criterion, train_loader, val_loader, epochs_n=epo, best_model_path=best_model_path_without_bn, lr=lr
+        )
+        all_losses_without_bn.extend(losses_without_bn)
+        all_grads_without_bn.extend(grads_without_bn)
 
-    # 保存最终模型
-    torch.save(model.state_dict(), final_model_path)
-
-    # 保存loss和gradient数据（带时间戳）
-    np.savetxt(os.path.join(
-        figures_path, f'losses_{timestamp}.txt'), losses, fmt='%s')
-    np.savetxt(os.path.join(
-        figures_path, f'grads_{timestamp}.txt'), grads, fmt='%s')
-
-    # 保存训练历史为CSV
-    history_df = pd.DataFrame({
-        'epoch': range(epo),
-        'train_loss': learning_curve,
-        'train_accuracy': train_accuracy_curve,
-        'val_accuracy': val_accuracy_curve
-    })
-    history_df.to_csv(os.path.join(
-        figures_path, f'training_history_{timestamp}.csv'), index=False)
+        # Train model with BN
+        model_with_bn = VGG_A_BatchNorm()
+        optimizer_with_bn = torch.optim.Adam(model_with_bn.parameters(), lr=lr)
+        best_model_path_with_bn = os.path.join(
+            models_path, f'best_model_with_bn_{lr}_{timestamp}.pth')
+        losses_with_bn, grads_with_bn = train(
+            model_with_bn, optimizer_with_bn, criterion, train_loader, val_loader, epochs_n=epo, best_model_path=best_model_path_with_bn, lr=lr
+        )
+        all_losses_with_bn.extend(losses_with_bn)
+        all_grads_with_bn.extend(grads_with_bn)
 
     # Plot loss landscape
-    plot_loss_landscape(losses)
+    plot_loss_landscape(all_losses_without_bn, all_losses_with_bn, 'Loss Landscape Comparison',
+                        os.path.join(figures_path, 'loss_landscape_comparison.png'))
 
-    # 假设class_names是CIFAR-10的类别名称（根据实际数据调整）
-    class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer',
-                   'dog', 'frog', 'horse', 'ship', 'truck']
-
-    # 保存样本图像和预测示例
-    save_sample_images(train_loader)
-    save_prediction_examples(model, val_loader, class_names)
-
-    print(f"所有结果已保存至: {figures_path} 和 {models_path}")
+    # Plot gradient landscape
+    plot_gradient_landscape(all_grads_without_bn, all_grads_with_bn, 'Gradient Landscape Comparison', os.path.join(
+        figures_path, 'gradient_landscape_comparison.png'))

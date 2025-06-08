@@ -13,8 +13,8 @@ from datetime import datetime
 import pandas as pd
 mpl.use('Agg')
 
-# 设置中文字体支持
-plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC"]
+# Set font support for English
+plt.rcParams["font.family"] = ["DejaVu Sans", "Arial", "sans-serif"]
 
 # ## Constants (parameters) initialization
 device_id = [0, 1, 2, 3]
@@ -25,14 +25,14 @@ batch_size = 128
 module_path = os.path.dirname(os.getcwd())
 home_path = module_path
 
-# 生成时间戳以避免文件覆盖
+# Generate timestamp to avoid file overwriting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 figures_path = os.path.join(home_path, 'reports', 'figures', timestamp)
 models_path = os.path.join(home_path, 'reports', 'models', timestamp)
 losses_path = os.path.join(home_path, 'reports', 'losses', timestamp)
 grads_path = os.path.join(home_path, 'reports', 'grads', timestamp)
 
-# 确保保存损失和梯度的目录存在
+# Ensure directories for saving losses and gradients exist
 os.makedirs(losses_path, exist_ok=True)
 os.makedirs(grads_path, exist_ok=True)
 
@@ -136,12 +136,6 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
 
         losses_list.append(loss_list)
         grads.append(grad)
-        display.clear_output(wait=True)
-        f, axes = plt.subplots(1, 2, figsize=(15, 5))
-
-        learning_curve[epoch] /= batches_n
-        axes[0].plot(learning_curve[:epoch+1])
-        axes[0].set_title('Training Loss')
 
         # Calculate accuracies
         train_acc = get_accuracy(model, train_loader)
@@ -161,91 +155,171 @@ def train(model, optimizer, criterion, train_loader, val_loader, scheduler=None,
                     'accuracy': val_acc,
                 }, best_model_path)
 
-        axes[1].plot(train_accuracy_curve[:epoch+1], label='Train')
-        axes[1].plot(val_accuracy_curve[:epoch+1], label='Validation')
-        axes[1].set_title('Accuracy')
-        axes[1].legend()
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(
-            figures_path, f'training_progress_lr_{lr}_epoch{epoch+1}.png'), dpi=300)
-        plt.close()  # Prevent memory leak
-
         print(f'Epoch {epoch+1}/{epochs_n}')
         print(f'Train Accuracy: {train_acc:.4f}, Val Accuracy: {val_acc:.4f}')
         print(
             f'Best Val Accuracy: {max_val_accuracy:.4f} at epoch {max_val_accuracy_epoch+1}')
 
-    # 保存损失和梯度
+    # Save losses and gradients
     np.save(os.path.join(losses_path, f'losses_lr_{lr}.npy'), losses_list)
     np.save(os.path.join(grads_path, f'grads_lr_{lr}.npy'), grads)
 
-    return losses_list, grads
+    return losses_list, grads, train_accuracy_curve, val_accuracy_curve
 
-# Use this function to plot the final loss landscape,
-# fill the area between the two curves can use plt.fill_between()
+# Helper function: Align training data of different lengths and compute statistics
 
 
-def plot_loss_landscape(losses_without_bn, losses_with_bn, title, save_path):
-    min_curve_without_bn = np.min(losses_without_bn, axis=0)
-    max_curve_without_bn = np.max(losses_without_bn, axis=0)
-    min_curve_with_bn = np.min(losses_with_bn, axis=0)
-    max_curve_with_bn = np.max(losses_with_bn, axis=0)
+def align_and_compute_statistics(data_list, max_length=None, percentile_range=(0, 100)):
+    """
+    Align training data of different lengths and compute statistical metrics
 
-    plt.figure(figsize=(10, 6))
-    x = np.arange(len(min_curve_without_bn))
+    Args:
+    data_list: A list containing data from multiple training epochs, 
+               each element is a list of loss or gradient values for an epoch
+    max_length: Maximum length. If None, use the maximum length in the data
+    percentile_range: Percentile range, tuple (lower bound, upper bound)
 
-    plt.plot(x, min_curve_without_bn,
-             label='Min Loss without BN', color='blue')
-    plt.plot(x, max_curve_without_bn, label='Max Loss without BN',
-             color='blue', linestyle='--')
-    plt.fill_between(x, min_curve_without_bn,
-                     max_curve_without_bn, color='blue', alpha=0.2)
+    Returns:
+    x: Array of time steps
+    min_curve: Minimum value curve for each time step
+    max_curve: Maximum value curve for each time step
+    mean_curve: Mean value curve for each time step
+    """
+    if max_length is None:
+        max_length = max(len(data) for data in data_list)
 
-    plt.plot(x, min_curve_with_bn, label='Min Loss with BN', color='red')
-    plt.plot(x, max_curve_with_bn, label='Max Loss with BN',
-             color='red', linestyle='--')
-    plt.fill_between(x, min_curve_with_bn, max_curve_with_bn,
-                     color='red', alpha=0.2)
+    # Create a 2D array filled with NaN for missing values
+    aligned_data = np.full((len(data_list), max_length), np.nan)
+    for i, data in enumerate(data_list):
+        aligned_data[i, :len(data)] = data
+
+    # Compute statistics for each time step
+    x = np.arange(max_length)
+    min_curve = np.nanpercentile(aligned_data, percentile_range[0], axis=0)
+    max_curve = np.nanpercentile(aligned_data, percentile_range[1], axis=0)
+    mean_curve = np.nanmean(aligned_data, axis=0)
+
+    return x, min_curve, max_curve, mean_curve
+
+# Plot loss landscape using improved statistical methods
+
+
+def plot_loss_landscape(losses_without_bn, losses_with_bn, title, save_path,
+                        percentile_range=(5, 95), plot_mean=True):
+    """
+    Plot loss landscape with linear y-axis scale
+    """
+    # Compute aligned statistics
+    x, min_without_bn, max_without_bn, mean_without_bn = align_and_compute_statistics(
+        losses_without_bn, percentile_range=percentile_range)
+    x, min_with_bn, max_with_bn, mean_with_bn = align_and_compute_statistics(
+        losses_with_bn, percentile_range=percentile_range)
+
+    plt.figure(figsize=(12, 7))
+
+    # Plot losses without BN
+    plt.fill_between(x, min_without_bn, max_without_bn, color='blue', alpha=0.2,
+                     label=f'Loss Range without BN ({percentile_range[0]}-{percentile_range[1]}%)')
+    if plot_mean:
+        plt.plot(x, mean_without_bn, color='blue', linestyle='-',
+                 label='Mean Loss without BN', alpha=0.7)
+
+    # Plot losses with BN
+    plt.fill_between(x, min_with_bn, max_with_bn, color='red', alpha=0.2,
+                     label=f'Loss Range with BN ({percentile_range[0]}-{percentile_range[1]}%)')
+    if plot_mean:
+        plt.plot(x, mean_with_bn, color='red', linestyle='-',
+                 label='Mean Loss with BN', alpha=0.7)
 
     plt.xlabel('Training Steps')
-    plt.ylabel('Loss')
+    plt.ylabel('Loss Value')
     plt.title(title)
-    plt.legend()
-    plt.grid(True)
+    plt.legend(loc='upper right')
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Remove scientific notation and use linear scale
+    plt.ticklabel_format(axis='y', style='plain', scilimits=(0, 0))
+
+    plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.close()
 
-# Plot gradient landscape
 
+def plot_gradient_landscape(grads_without_bn, grads_with_bn, title, save_path,
+                            percentile_range=(5, 95), plot_mean=True):
+    """
+    Plot gradient landscape with linear y-axis scale
+    """
+    # Compute aligned statistics
+    x, min_without_bn, max_without_bn, mean_without_bn = align_and_compute_statistics(
+        grads_without_bn, percentile_range=percentile_range)
+    x, min_with_bn, max_with_bn, mean_with_bn = align_and_compute_statistics(
+        grads_with_bn, percentile_range=percentile_range)
 
-def plot_gradient_landscape(grads_without_bn, grads_with_bn, title, save_path):
-    min_curve_without_bn = np.min(grads_without_bn, axis=0)
-    max_curve_without_bn = np.max(grads_without_bn, axis=0)
-    min_curve_with_bn = np.min(grads_with_bn, axis=0)
-    max_curve_with_bn = np.max(grads_with_bn, axis=0)
+    plt.figure(figsize=(12, 7))
 
-    plt.figure(figsize=(10, 6))
-    x = np.arange(len(min_curve_without_bn))
+    # Plot gradients without BN
+    plt.fill_between(x, min_without_bn, max_without_bn, color='blue', alpha=0.2,
+                     label=f'Gradient Range without BN ({percentile_range[0]}-{percentile_range[1]}%)')
+    if plot_mean:
+        plt.plot(x, mean_without_bn, color='blue', linestyle='-',
+                 label='Mean Gradient without BN', alpha=0.7)
 
-    plt.plot(x, min_curve_without_bn,
-             label='Min Gradient without BN', color='blue')
-    plt.plot(x, max_curve_without_bn, label='Max Gradient without BN',
-             color='blue', linestyle='--')
-    plt.fill_between(x, min_curve_without_bn,
-                     max_curve_without_bn, color='blue', alpha=0.2)
-
-    plt.plot(x, min_curve_with_bn, label='Min Gradient with BN', color='red')
-    plt.plot(x, max_curve_with_bn, label='Max Gradient with BN',
-             color='red', linestyle='--')
-    plt.fill_between(x, min_curve_with_bn, max_curve_with_bn,
-                     color='red', alpha=0.2)
+    # Plot gradients with BN
+    plt.fill_between(x, min_with_bn, max_with_bn, color='red', alpha=0.2,
+                     label=f'Gradient Range with BN ({percentile_range[0]}-{percentile_range[1]}%)')
+    if plot_mean:
+        plt.plot(x, mean_with_bn, color='red', linestyle='-',
+                 label='Mean Gradient with BN', alpha=0.7)
 
     plt.xlabel('Training Steps')
-    plt.ylabel('Gradient')
+    plt.ylabel('Gradient Value')
     plt.title(title)
-    plt.legend()
-    plt.grid(True)
+    plt.legend(loc='upper right')
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Remove scientific notation and use linear scale
+    plt.ticklabel_format(axis='y', style='plain', scilimits=(0, 0))
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+
+def plot_accuracy_comparison(accuracies, title, save_path):
+    """
+    Plot accuracy comparison between different models and learning rates
+
+    Args:
+    accuracies: Dictionary containing accuracy curves for different models and learning rates
+    title: Plot title
+    save_path: Path to save the plot
+    """
+    plt.figure(figsize=(12, 7))
+
+    colors = ['blue', 'red', 'green', 'purple']
+
+    for i, (lr, lr_data) in enumerate(accuracies.items()):
+        # Plot training accuracy
+        plt.plot(lr_data['train_without_bn'], color=colors[i], linestyle='-',
+                 label=f'Train w/o BN, lr={lr}')
+        plt.plot(lr_data['train_with_bn'], color=colors[i], linestyle='--',
+                 label=f'Train with BN, lr={lr}')
+
+        # Plot validation accuracy
+        plt.plot(lr_data['val_without_bn'], color=colors[i], linestyle=':',
+                 label=f'Val w/o BN, lr={lr}')
+        plt.plot(lr_data['val_with_bn'], color=colors[i], linestyle='-.',
+                 label=f'Val with BN, lr={lr}')
+
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title(title)
+    plt.legend(loc='lower right')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.ylim(0, 1)
+
+    plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.close()
 
@@ -281,8 +355,12 @@ if __name__ == '__main__':
     all_losses_with_bn = []
     all_grads_with_bn = []
 
+    # Dictionary to store accuracy curves for each learning rate
+    accuracy_data = {}
+
     for lr in learning_rates:
         set_random_seeds(seed_value=2020, device=str(device))
+        accuracy_data[lr] = {}
 
         # Train model without BN
         model_without_bn = VGG_A()
@@ -291,27 +369,54 @@ if __name__ == '__main__':
         criterion = nn.CrossEntropyLoss()
         best_model_path_without_bn = os.path.join(
             models_path, f'best_model_without_bn_{lr}_{timestamp}.pth')
-        losses_without_bn, grads_without_bn = train(
+        losses_without_bn, grads_without_bn, train_acc_without_bn, val_acc_without_bn = train(
             model_without_bn, optimizer_without_bn, criterion, train_loader, val_loader, epochs_n=epo, best_model_path=best_model_path_without_bn, lr=lr
         )
         all_losses_without_bn.extend(losses_without_bn)
         all_grads_without_bn.extend(grads_without_bn)
+
+        # Store accuracy curves
+        accuracy_data[lr]['train_without_bn'] = train_acc_without_bn
+        accuracy_data[lr]['val_without_bn'] = val_acc_without_bn
 
         # Train model with BN
         model_with_bn = VGG_A_BatchNorm()
         optimizer_with_bn = torch.optim.Adam(model_with_bn.parameters(), lr=lr)
         best_model_path_with_bn = os.path.join(
             models_path, f'best_model_with_bn_{lr}_{timestamp}.pth')
-        losses_with_bn, grads_with_bn = train(
+        losses_with_bn, grads_with_bn, train_acc_with_bn, val_acc_with_bn = train(
             model_with_bn, optimizer_with_bn, criterion, train_loader, val_loader, epochs_n=epo, best_model_path=best_model_path_with_bn, lr=lr
         )
         all_losses_with_bn.extend(losses_with_bn)
         all_grads_with_bn.extend(grads_with_bn)
 
-    # Plot loss landscape
-    plot_loss_landscape(all_losses_without_bn, all_losses_with_bn, 'Loss Landscape Comparison',
-                        os.path.join(figures_path, 'loss_landscape_comparison.png'))
+        # Store accuracy curves
+        accuracy_data[lr]['train_with_bn'] = train_acc_with_bn
+        accuracy_data[lr]['val_with_bn'] = val_acc_with_bn
 
-    # Plot gradient landscape
-    plot_gradient_landscape(all_grads_without_bn, all_grads_with_bn, 'Gradient Landscape Comparison', os.path.join(
-        figures_path, 'gradient_landscape_comparison.png'))
+    # Plot loss landscape for each learning rate
+    for lr in learning_rates:
+        # Filter losses for current learning rate
+        lr_losses_without_bn = all_losses_without_bn[(
+            learning_rates.index(lr)*epo):((learning_rates.index(lr)+1)*epo)]
+        lr_losses_with_bn = all_losses_with_bn[(
+            learning_rates.index(lr)*epo):((learning_rates.index(lr)+1)*epo)]
+
+        plot_loss_landscape(lr_losses_without_bn, lr_losses_with_bn,
+                            f'Loss Landscape Comparison (w/o BN vs w/ BN), lr={lr}',
+                            os.path.join(figures_path, f'loss_landscape_comparison_{lr}_{timestamp}.png'))
+
+        # Filter gradients for current learning rate
+        lr_grads_without_bn = all_grads_without_bn[(
+            learning_rates.index(lr)*epo):((learning_rates.index(lr)+1)*epo)]
+        lr_grads_with_bn = all_grads_with_bn[(
+            learning_rates.index(lr)*epo):((learning_rates.index(lr)+1)*epo)]
+
+        plot_gradient_landscape(lr_grads_without_bn, lr_grads_with_bn,
+                                f'Gradient Landscape Comparison (w/o BN vs w/ BN), lr={lr}',
+                                os.path.join(figures_path, f'gradient_landscape_comparison_{lr}_{timestamp}.png'))
+
+    # Plot accuracy comparison for all learning rates
+    plot_accuracy_comparison(accuracy_data,
+                             'Accuracy Comparison between models with/without BatchNorm',
+                             os.path.join(figures_path, f'accuracy_comparison_{timestamp}.png'))

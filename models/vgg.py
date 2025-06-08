@@ -201,6 +201,11 @@ class VGG_A_Dropout(nn.Module):
 
 
 class VGG_A_BatchNorm(nn.Module):
+    """VGG_A model with Batch Normalization
+
+    Same as VGG_A but with BN layers added after each Conv2d and before ReLU
+    """
+
     def __init__(self, inp_ch=3, num_classes=10, init_weights=True):
         super().__init__()
 
@@ -271,7 +276,17 @@ class VGG_A_BatchNorm(nn.Module):
 
     def _init_weights(self):
         for m in self.modules():
-            init_weights_(m)
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
 
 
 if __name__ == '__main__':

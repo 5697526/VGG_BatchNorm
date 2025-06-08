@@ -52,12 +52,13 @@ python data/loaders.py
 
 #### 3. 模型定义：
 
-**VGG - A 模型：**在 `models/vgg.py` 中定义了 `VGG_A` 类，该类实现了基本的 VGG - A 网络结构。
-**VGG - A with BN 模型：**同样在 `models/vgg.py` 中定义了 `VGG_A_BatchNorm` 类，该类在 `VGG_A` 的基础上添加了 Batch Normalization 层。
+VGG - A 模型：在 `models/vgg.py` 中定义了 `VGG_A` 类，该类实现了基本的 VGG - A 网络结构。
+
+VGG - A with BN 模型：同样在 `models/vgg.py` 中定义了 `VGG_A_BatchNorm` 类，该类在 `VGG_A` 的基础上添加了 Batch Normalization 层。
 
 #### 4. 模型训练与可视化评估：
 
-运行 `VGG_Loss_Landscape.py` 脚本进行模型训练和评估。其中 `train` 函数用于完成整个训练过程，记录每个步骤的损失值和梯度，并在每个 epoch 结束时计算训练集和验证集的准确率。`get_accuracy` 函数用于计算模型在数据集上的准确率。`plot_loss_landscape` 函数用于绘制损失景观图，对比使用 BN 和不使用 BN 的模型在训练过程中的损失变化范围。`plot_gradient_landscape` 函数用于绘制梯度景观图，对比使用 BN 和不使用 BN 的模型在训练过程中的梯度变化范围。在 `__main__` 函数中，设置了多个学习率 [1e-3, 2e-3, 1e-4, 5e-4]，分别对使用 BN 和不使用 BN 的模型进行训练。
+运行 `VGG_Loss_Landscape.py` 脚本进行模型训练和评估。其中 `train` 函数用于完成整个训练过程，记录每个步骤的损失值和梯度，并在每个 epoch 结束时计算训练集和验证集的准确率。`get_accuracy` 函数用于计算模型在数据集上的准确率。`plot_loss_landscape` 函数用于绘制损失景观图，对比使用 BN 和不使用 BN 的模型在训练过程中的损失变化范围。`plot_gradient_landscape` 函数用于绘制梯度景观图，对比使用 BN 和不使用 BN 的模型在训练过程中的梯度变化范围。`plot_accuracy_comparison` 函数用于绘制准确率对比图，展示不同学习率、是否含 BN 的模型在训练集和验证集上的准确率变化。在 `__main__` 函数中，设置了多个学习率 [1e-3, 2e-3, 1e-4, 5e-4]，分别对使用 BN 和不使用 BN 的模型进行训练。
 
 ```
 python VGG_Loss_Landscape.py
@@ -66,4 +67,4 @@ python VGG_Loss_Landscape.py
 
 
 ### 五、模型权重下载
-模型和可视化结果保存在我的网盘: 
+模型和可视化结果保存在我的网盘: https://pan.baidu.com/s/1-OalQPQvMTUNwAJnRb5-dQ?pwd=8nxp 提取码: 8nxp
